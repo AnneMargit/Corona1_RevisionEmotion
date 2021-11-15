@@ -1,0 +1,277 @@
+---
+title: "211109 anxiety additional analyses"
+author: "Anne Margit"
+date: "11/05/2021"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, results = "hide"}
+load("data_analyse2_p1.Rdata")
+load("data_analyse2_p2.Rdata")
+load("data_analyse2_p3.Rdata")
+```
+
+```{r, message=F}
+options(scipen=999)
+
+library(dplyr)
+library(tidyverse)
+library(ggpubr)
+library(ggplot2)
+library(rockchalk)
+library(effects)
+library(nlme)
+library(lattice)
+library(broom.mixed)
+library(purrr)
+library(stargazer)
+library(viridis)  
+```
+
+
+```{r, message=F, comment=NA}
+data_analyse2_p1$Edu <- as.numeric(data_analyse2_p1$Edu)
+
+```
+
+# Phase 1
+*Random: IC for ID and Country + Covariates Gender and Education*
+```{r, message=F, comment=NA}
+model_Anxp1 <- lme(fixed = Anxiety ~ Gender + Edu + Age_new,
+                  random = ~1 | Country/ID, 
+                  data = data_analyse2_p1, 
+                  na.action = na.omit)
+
+summary(model_Anxp1)
+```
+
+*Plot of predicted values*
+```{r, results = "hide", message=F}
+ef_Anxp1 <- effect("Age_new", model_Anxp1)
+
+plot_Anxp1 <- ggplot(as.data.frame(ef_Anxp1), 
+  aes(Age_new, fit, color=Age_new)) + geom_line() + 
+  geom_errorbar(aes(ymin=fit-se, ymax=fit+se), width=1) + theme_minimal(base_size=12) + 
+  labs(title="Anxiety during tightening of restrictions", y = "Anxiety") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_x_discrete(name ="Age", labels=c("18-24", "25-44", "45-64", "65+")) +
+  theme(legend.position = "none") +                 
+  scale_color_discrete() + 
+  expand_limits(y=c(1, 5))
+```
+
+```{r, message=F}
+plot_Anxp1
+```
+
+```{r, message=F, comment=NA}
+intervals(model_Anxp1)
+VarCorr(model_Anxp1)
+```
+
+*Effect sizes*
+```{r, message=F, comment=NA}
+ISDs <- data_analyse2_p1 %>% 
+  group_by(ID) %>%
+  summarize_at(c("Anxiety"), sd, na.rm=TRUE) %>%
+  ungroup()
+
+ISDs_av <- ISDs %>%
+  summarize_at(c("Anxiety"), mean, na.rm=TRUE) %>%
+  stack() %>%
+  rename(sd=values) 
+```
+
+> Effect size = regression coefficient / average ISD of Anxiety
+
+```{r, message=F, comment=NA}
+coef_Anxp1 = tidy(model_Anxp1, 
+               effects = "fixed")
+
+coef_Anxp1 <- coef_Anxp1 %>%
+  mutate (e_size = estimate/0.6174475) %>% 
+  mutate(across(2:7, round, 2)) 
+         
+```
+
+```{r}
+coef_Anxp1
+coef_Anxp1 <- as.matrix(coef_Anxp1)
+```
+
+# Phase 2
+
+*Best model*
+
+> Random intercept for ID and Country, random slope for Country and ID, no correlation between random intercept and slope for Country, AR correlation structure at Measurement level
+
+```{r, message=F, comment=NA}
+data_analyse2_p2$Edu <- as.numeric(data_analyse2_p2$Edu)
+
+data_analyse2_p2 <- data_analyse2_p2[with(data_analyse2_p2, order(Country, ID, Time)),]
+data_analyse2_p2$Time <- as.numeric(data_analyse2_p2$Time)
+
+model_Anxp2 <- lme(fixed = Anxiety ~ Gender + Edu + DaysMax_p2 + Age_new + DaysMax_p2*Age_new,
+                  random = list(Country = pdDiag(~DaysMax_p2), ID = ~DaysMax_p2),  
+                  data = data_analyse2_p2, 
+                  na.action = na.omit,
+                  correlation = corAR1(form = ~ Time | Country/ID))
+summary(model_Anxp2)
+
+```
+
+*Plot of predicted values*
+```{r, results = "hide", message=F}
+ef_Anxp2 <- effect("DaysMax_p2:Age_new", model_Anxp2)
+plot_Anxp2 <- ggplot(as.data.frame(ef_Anxp2), aes(DaysMax_p2, fit, color=Age_new)) + 
+  geom_line(size=1) + 
+  geom_errorbar(aes(ymin=fit-se, ymax=fit+se), width=1) + 
+  theme_minimal(base_size=12) + 
+  labs(title="A",
+       x="Days", y = "Anxiety") +
+  xlim(0,80)+
+  theme(plot.title = element_text(size=12)) +
+  scale_color_discrete(name="Age", labels = c("18-24", "25-44", "45-64", "65+")) + 
+  expand_limits(y=c(1, 5))
+```
+
+```{r, message=F}
+plot_Anxp2
+```
+
+```{r, message=F, comment=NA}
+VarCorr(model_Anxp2)
+intervals(model_Anxp2, which = 'fixed')
+```
+
+*Effect sizes*
+
+**Within person SD and average within person SD**
+
+```{r, message=F, comment=NA}
+ISDs <- data_analyse2_p2 %>% 
+  group_by(ID) %>%
+  summarize_at(c("DaysMax_p2", "Anxiety"), sd, na.rm=TRUE) %>%
+  ungroup()
+
+ISDs_av <- ISDs %>%
+  summarize_at(c("DaysMax_p2", "Anxiety"), mean, na.rm=TRUE) %>%
+  stack() %>%
+  rename(sd=values) 
+```
+
+> Effect sizes for intercept and main effect of age and covariates = regression coefficient / average ISD of Anxiety
+> Effect size for main effect of DaysMax = (regression coefficient * 28)/ average ISD of Anxiety
+> Effect sizes for interaction effects = (regression coefficient * 28)/ average ISD of Anxiety
+> The effect sizes for main effect of DaysMax and the interaction effects reflect the increase in SD of Anxiety over 4 weeks (28 days)
+
+```{r, message=F, comment=NA}
+coef_Anxp2 = tidy(model_Anxp2, 
+               effects = "fixed")
+coef_Anxp2 <- coef_Anxp2 %>%
+  mutate(e_size = ifelse(row_number()== 1 | row_number()== 2 |  row_number()== 3 |  row_number()== 5 |  row_number()== 6 |  row_number()== 7, estimate/0.5862621, (estimate*28)/0.5862621)) %>%
+  mutate(across(2:7, round, 2)) 
+          
+```
+
+```{r}
+coef_Anxp2 <- as.matrix(coef_Anxp2)
+coef_Anxp2
+```
+
+# Phase 3
+
+> Random intercept for ID and Country, random slope for ID and AR correlation structure at Measurement level
+
+```{r, message=F, comment=NA}
+data_analyse2_p3$Edu <- as.numeric(data_analyse2_p3$Edu)
+data_analyse2_p3 <- data_analyse2_p3[with(data_analyse2_p3, order(Country, ID, Time)),]
+data_analyse2_p3$Time <- as.numeric(data_analyse2_p3$Time)
+model_Anxp3 <- lme(fixed = Anxiety ~ Gender + Edu + DaysPhase3 + Age_new + DaysPhase3*Age_new,
+                  random = list (Country = ~1, ID = ~DaysPhase3), 
+                  data = data_analyse2_p3, 
+                  na.action = na.omit,
+                  correlation = corAR1(form = ~ Time | Country/ID))
+summary(model_Anxp3)
+VarCorr(model_Anxp3)
+```
+
+*Confidence intervals*
+```{r, message=F, comment=NA}
+intervals(model_Anxp3, which = 'fixed')
+```
+
+*Plot of predicted values*
+```{r, results = "hide", message=F}
+ef_Anxp3 <- effect("DaysPhase3:Age_new", model_Anxp3)
+plot_Anxp3 <- ggplot(as.data.frame(ef_Anxp3), aes(DaysPhase3, fit, color=Age_new)) + 
+  geom_line(size=1) + 
+  geom_errorbar(aes(ymin=fit-se, ymax=fit+se), width=1) + 
+  theme_minimal(base_size=12) + 
+  xlim(0,80)+
+  labs(title="B",
+       x="Days", y = "Anxiety") +
+  theme(plot.title = element_text(size = 12)) +
+  scale_color_discrete(name="Age", labels = c("18-24", "25-44", "45-64", "65+")) + 
+  expand_limits(y=c(1, 5))
+```
+
+```{r, message=F}
+plot_Anxp3
+```
+
+```{r, message=F}
+plot_Anxp2and3 <- ggarrange(plot_Anxp2, plot_Anxp3 , 
+          ncol = 2, nrow = 1, common.legend=TRUE, legend= "bottom")
+plot_Anxp2and3 <- annotate_figure(plot_Anxp2and3,top = text_grob("Anxiety trajectories during peak (A) and easing (B) of restrictions", size = 12))
+```
+
+```{r, message=F}
+plot_Anxp2and3
+```
+
+*Effect sizes*
+**Within person SD and average within person SD for Anxiety**
+```{r, message=F, comment=NA}
+ISDs <- data_analyse2_p3 %>% 
+  group_by(ID) %>%
+  summarize_at(c("Anxiety"), sd, na.rm=TRUE) %>%
+  ungroup()
+ISDs_av <- ISDs %>%
+  summarize_at(c("Anxiety"), mean, na.rm=TRUE) %>%
+  stack() %>%
+  rename(sd=values) 
+```
+
+> Effect sizes for intercept and main effect of age = regression coefficient / average ISD of Anxiety
+> Effect size for main effect of DaysMax = (regression coefficient * 28)/ average ISD of Anxiety
+> Effect sizes for interaction effects = (regression coefficient * 28)/ average ISD of Anxiety
+> The effect sizes for main effect of DaysMax and the interaction effects reflect the increase in SD of Anxiety over 4 weeks (28 days)
+
+```{r, message=F, comment=NA}
+coef_Anxp3 = tidy(model_Anxp3, 
+               effects = "fixed")
+coef_Anxp3 <- coef_Anxp3 %>%
+ mutate(e_size = ifelse(row_number()== 1 | row_number()== 2 |  row_number()== 3 |  row_number()== 5 |  row_number()== 6 |  row_number()== 7, estimate/0.5501028, (estimate*28)/0.5501028)) %>%
+  mutate(across(2:7, round, 2)) 
+```
+
+```{r}
+coef_Anxp3 <- as.matrix(coef_Anxp3)
+coef_Anxp3
+```
+
+```{r}
+stargazer(coef_Anxp1, coef_Anxp2, coef_Anxp3,
+type="html", df = TRUE, out="star_coefAnxp123.doc",  single.row=TRUE, digits = 2, align = TRUE)
+
+stargazer(model_Anxp1, model_Anxp2, model_Anxp3,
+type="html", df = TRUE, out="star_modelAnxp123.doc",  single.row=TRUE, digits = 2, align = TRUE,
+intercept.top = TRUE, intercept.bottom = FALSE)
+
+```

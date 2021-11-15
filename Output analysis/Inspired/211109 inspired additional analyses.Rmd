@@ -1,0 +1,276 @@
+---
+title: "211109 inspired additional analyses"
+author: "Anne Margit"
+date: "11/05/2021"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, results = "hide"}
+load("data_analyse2_p1.Rdata")
+load("data_analyse2_p2.Rdata")
+load("data_analyse2_p3.Rdata")
+```
+
+```{r, message=F}
+options(scipen=999)
+
+library(dplyr)
+library(tidyverse)
+library(ggpubr)
+library(ggplot2)
+library(rockchalk)
+library(effects)
+library(nlme)
+library(lattice)
+library(broom.mixed)
+library(purrr)
+library(stargazer)
+library(viridis)  
+```
+
+
+```{r, message=F, comment=NA}
+data_analyse2_p1$Edu <- as.numeric(data_analyse2_p1$Edu)
+
+```
+
+# Phase 1
+*Random: IC for ID and Country + Covariates Gender and Education*
+```{r, message=F, comment=NA}
+model_Inspp1 <- lme(fixed = Insp ~ Gender + Edu + Age_new,
+                  random = ~1 | Country/ID, 
+                  data = data_analyse2_p1, 
+                  na.action = na.omit)
+
+summary(model_Inspp1)
+```
+
+*Plot of predicted values*
+```{r, results = "hide", message=F}
+ef_Inspp1 <- effect("Age_new", model_Inspp1)
+
+plot_Inspp1 <- ggplot(as.data.frame(ef_Inspp1), 
+  aes(Age_new, fit, color=Age_new)) + geom_line() + 
+  geom_errorbar(aes(ymin=fit-se, ymax=fit+se), width=1) + theme_minimal(base_size=12) + 
+  labs(title="Inspiration during tightening of restrictions", y = "Inspiration") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_x_discrete(name ="Age", labels=c("18-24", "25-44", "45-64", "65+")) +
+  theme(legend.position = "none") +                 
+  scale_color_discrete() + 
+  expand_limits(y=c(1, 5))
+```
+
+```{r, message=F}
+plot_Inspp1
+```
+
+```{r, message=F, comment=NA}
+intervals(model_Inspp1)
+VarCorr(model_Inspp1)
+```
+
+*Effect sizes*
+```{r, message=F, comment=NA}
+ISDs <- data_analyse2_p1 %>% 
+  group_by(ID) %>%
+  summarize_at(c("Insp"), sd, na.rm=TRUE) %>%
+  ungroup()
+
+ISDs_av <- ISDs %>%
+  summarize_at(c("Insp"), mean, na.rm=TRUE) %>%
+  stack() %>%
+  rename(sd=values) 
+```
+
+> Effect size = regression coefficient / average ISD of Inspired
+
+```{r, message=F, comment=NA}
+coef_Inspp1 = tidy(model_Inspp1, 
+               effects = "fixed")
+
+coef_Inspp1 <- coef_Inspp1 %>%
+  mutate (e_size = estimate/0.5828323) %>% 
+  mutate(across(2:7, round, 2)) 
+         
+```
+
+```{r}
+coef_Inspp1
+coef_Inspp1 <- as.matrix(coef_Inspp1)
+```
+
+# Phase 2
+
+*Best model*
+
+> Random intercept for ID and Country, random slope for ID, no correlation between IC and S for ID + AR correlation structure at Measurement level
+
+```{r, message=F, comment=NA}
+data_analyse2_p2$Edu <- as.numeric(data_analyse2_p2$Edu)
+data_analyse2_p2 <- data_analyse2_p2[with(data_analyse2_p2, order(Country, ID, Time)),]
+data_analyse2_p2$Time <- as.numeric(data_analyse2_p2$Time)
+model_Inspp2 <- lme(fixed = Insp ~ Gender + Edu + DaysMax_p2 + Age_new + DaysMax_p2*Age_new,
+                  random = list(Country = ~1, ID = pdDiag(~DaysMax_p2)),
+                  data = data_analyse2_p2, 
+                  na.action = na.omit,
+                  correlation = corAR1(form = ~Time | Country/ID))
+summary(model_Inspp2)
+VarCorr(model_Inspp2)
+```
+
+*Plot of predicted values*
+```{r, results = "hide", message=F}
+ef_Inspp2 <- effect("DaysMax_p2:Age_new", model_Inspp2)
+plot_Inspp2 <- ggplot(as.data.frame(ef_Inspp2), aes(DaysMax_p2, fit, color=Age_new)) + 
+  geom_line(size=1) + 
+  geom_errorbar(aes(ymin=fit-se, ymax=fit+se), width=1) + 
+  theme_minimal(base_size=12) + 
+  labs(title="A",
+       x="Days", y = "Inspiration") +
+  xlim(0,80)+
+  theme(plot.title = element_text(size=12)) +
+  scale_color_discrete(name="Age", labels = c("18-24", "25-44", "45-64", "65+")) + 
+  expand_limits(y=c(1, 5))
+```
+
+```{r, message=F}
+plot_Inspp2
+```
+
+```{r, message=F, comment=NA}
+VarCorr(model_Inspp2)
+intervals(model_Inspp2, which = 'fixed')
+```
+
+*Effect sizes*
+
+**Within person SD and average within person SD**
+
+```{r, message=F, comment=NA}
+ISDs <- data_analyse2_p2 %>% 
+  group_by(ID) %>%
+  summarize_at(c("DaysMax_p2", "Insp"), sd, na.rm=TRUE) %>%
+  ungroup()
+
+ISDs_av <- ISDs %>%
+  summarize_at(c("DaysMax_p2", "Insp"), mean, na.rm=TRUE) %>%
+  stack() %>%
+  rename(sd=values) 
+```
+
+> Effect sizes for intercept and main effect of age and covariates = regression coefficient / average ISD of Inspired
+> Effect size for main effect of DaysMax = (regression coefficient * 28)/ average ISD of Inspired
+> Effect sizes for interaction effects = (regression coefficient * 28)/ average ISD of Inspired
+> The effect sizes for main effect of DaysMax and the interaction effects reflect the increase in SD of Inspired over 4 weeks (28 days)
+
+```{r, message=F, comment=NA}
+coef_Inspp2 = tidy(model_Inspp2, 
+               effects = "fixed")
+coef_Inspp2 <- coef_Inspp2 %>%
+  mutate(e_size = ifelse(row_number()== 1 | row_number()== 2 |  row_number()== 3 |  row_number()== 5 |  row_number()== 6 |  row_number()== 7, estimate/0.5925649, (estimate*28)/0.5925649)) %>%
+  mutate(across(2:7, round, 2)) 
+          
+```
+
+```{r}
+coef_Inspp2 <- as.matrix(coef_Inspp2)
+coef_Inspp2
+```
+
+# Phase 3
+
+> Random: IC for ID and Country, S for ID, no correlation between IC and S for ID + AR
+
+```{r, message=F, comment=NA}
+data_analyse2_p3$Edu <- as.numeric(data_analyse2_p3$Edu)
+data_analyse2_p3 <- data_analyse2_p3[with(data_analyse2_p3, order(Country, ID, Time)),]
+data_analyse2_p3$Time <- as.numeric(data_analyse2_p3$Time)
+model_Inspp3 <- lme(fixed = Insp ~ Gender + Edu + DaysPhase3 + Age_new + DaysPhase3*Age_new,
+                  random = list (Country = ~1, ID = pdDiag(~DaysPhase3)), 
+                  data = data_analyse2_p3, 
+                  na.action = na.omit,
+                  correlation = corAR1(form = ~ Time | Country/ID))
+summary(model_Inspp3)
+VarCorr(model_Inspp3)
+```
+
+
+*Confidence intervals*
+```{r, message=F, comment=NA}
+intervals(model_Inspp3, which = 'fixed')
+```
+
+*Plot of predicted values*
+```{r, results = "hide", message=F}
+ef_Inspp3 <- effect("DaysPhase3:Age_new", model_Inspp3)
+plot_Inspp3 <- ggplot(as.data.frame(ef_Inspp3), aes(DaysPhase3, fit, color=Age_new)) + 
+  geom_line(size=1) + 
+  geom_errorbar(aes(ymin=fit-se, ymax=fit+se), width=1) + 
+  theme_minimal(base_size=12) + 
+  xlim(0,80)+
+  labs(title="B",
+       x="Days", y = "Inspiration") +
+  theme(plot.title = element_text(size = 12)) +
+  scale_color_discrete(name="Age", labels = c("18-24", "25-44", "45-64", "65+")) + 
+  expand_limits(y=c(1, 5))
+```
+
+```{r, message=F}
+plot_Inspp3
+```
+
+```{r, message=F}
+plot_Inspp2and3 <- ggarrange(plot_Inspp2, plot_Inspp3 , 
+          ncol = 2, nrow = 1, common.legend=TRUE, legend= "bottom")
+plot_Inspp2and3 <- annotate_figure(plot_Inspp2and3,top = text_grob("Inspiration during peak (A) and easing (B) of restrictions", size = 12))
+```
+
+```{r, message=F}
+plot_Inspp2and3
+```
+
+*Effect sizes*
+**Within person SD and average within person SD for Inspetic**
+```{r, message=F, comment=NA}
+ISDs <- data_analyse2_p3 %>% 
+  group_by(ID) %>%
+  summarize_at(c("Insp"), sd, na.rm=TRUE) %>%
+  ungroup()
+ISDs_av <- ISDs %>%
+  summarize_at(c("Insp"), mean, na.rm=TRUE) %>%
+  stack() %>%
+  rename(sd=values) 
+```
+
+> Effect sizes for intercept and main effect of age = regression coefficient / average ISD of Inspired
+> Effect size for main effect of DaysMax = (regression coefficient * 28)/ average ISD of Inspired
+> Effect sizes for interaction effects = (regression coefficient * 28)/ average ISD of Inspired
+> The effect sizes for main effect of DaysMax and the interaction effects reflect the increase in SD of Inspired over 4 weeks (28 days)
+
+```{r, message=F, comment=NA}
+coef_Inspp3 = tidy(model_Inspp3, 
+               effects = "fixed")
+coef_Inspp3 <- coef_Inspp3 %>%
+ mutate(e_size = ifelse(row_number()== 1 | row_number()== 2 |  row_number()== 3 |  row_number()== 5 |  row_number()== 6 |  row_number()== 7, estimate/0.5855497, (estimate*28)/0.5855497)) %>%
+  mutate(across(2:7, round, 2)) 
+```
+
+```{r}
+coef_Inspp3 <- as.matrix(coef_Inspp3)
+coef_Inspp3
+```
+
+```{r}
+stargazer(coef_Inspp1, coef_Inspp2, coef_Inspp3,
+type="html", df = TRUE, out="star_coefInspp123.doc",  single.row=TRUE, digits = 2, align = TRUE)
+
+stargazer(model_Inspp1, model_Inspp2, model_Inspp3,
+type="html", df = TRUE, out="star_modelInspp123.doc",  single.row=TRUE, digits = 2, align = TRUE,
+intercept.top = TRUE, intercept.bottom = FALSE)
+
+```
